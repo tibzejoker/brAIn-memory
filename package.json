@@ -1,0 +1,14 @@
+{
+  "name": "brAIn-memory",
+  "private": true,
+  "license": "MIT",
+  "description": "brAIn memory-domain nodes — KV store, vector store, intelligent gateway, autonomous consolidator, scheduled reminders. Plug into the brAIn framework via the @brain/node-* packages, the brAIn-store marketplace, or as workspace members of a sibling brAIn checkout.",
+  "scripts": {
+    "build": "pnpm -r build",
+    "clean": "pnpm -r exec rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0"
+  }
+}
