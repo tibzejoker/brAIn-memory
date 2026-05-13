@@ -136,7 +136,7 @@ export const handler: NodeHandler = async (ctx) => {
           system: "Extract search formulations from the user question. ALWAYS produce English. Use the `reformulate_query` tool.",
           prompt: content,
         });
-        const args = result.args as { kv?: string; vec?: string };
+        const args = result as { kv?: string; vec?: string };
         if (args.kv) kvQuery = args.kv;
         if (args.vec) vecQuery = args.vec;
       } catch {
