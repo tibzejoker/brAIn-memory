@@ -60,11 +60,30 @@ function parseAction(text: string): Action | null {
   return null;
 }
 
+// Minimum interval between idle consolidation runs (ms).
+const RUN_INTERVAL_MS = 60 * 60 * 1000; // 1h
+
 export const handler: NodeHandler = async (ctx) => {
   // Determine wake context
   const wokeFromSleep = ctx.state._woke_from_sleep as boolean | undefined;
   const hasMessages = ctx.messages.length > 0;
   const pendingAction = ctx.state._pending_action as string | undefined;
+
+  // Gate periodic ticks: most time.tick messages are no-ops. We only run if a
+  // pending action result is in, a non-tick message arrived, or RUN_INTERVAL_MS
+  // has elapsed since the last run.
+  const tickMessages = ctx.messages.filter((m) => m.topic === "time.tick");
+  const nonTickMessages = ctx.messages.filter((m) => m.topic !== "time.tick");
+  const lastRunAt = (ctx.state._last_run_at as number | undefined) ?? 0;
+  const now = Date.now();
+  const intervalElapsed = now - lastRunAt >= RUN_INTERVAL_MS;
+  const hasWorkSignal = nonTickMessages.length > 0 || pendingAction !== undefined;
+
+  if (tickMessages.length > 0 && !hasWorkSignal && !intervalElapsed) {
+    // Idle tick: nothing to do, just park.
+    return;
+  }
+  ctx.state._last_run_at = now;
 
   // Build conversation from state (persists across budget cycles)
   if (!ctx.state._conversation) ctx.state._conversation = [];
@@ -116,7 +135,6 @@ export const handler: NodeHandler = async (ctx) => {
     const action = parseAction(text);
     if (!action) {
       ctx.log("info", "No action parsed, sleeping");
-      ctx.sleep([{ type: "timer", value: "1h" }, { type: "any" }]);
       return;
     }
 
@@ -175,7 +193,6 @@ export const handler: NodeHandler = async (ctx) => {
         }
         ctx.state._progress = undefined;
         ctx.state._conversation = [];
-        ctx.sleep([{ type: "timer", value: "1h" }, { type: "any" }]);
         return;
 
       default:
@@ -183,16 +200,10 @@ export const handler: NodeHandler = async (ctx) => {
         conversation.push({ role: "user", content: `Unknown action "${action.action}". Use: list, search, delete, update, store, or sleep.` });
     }
 
-    // After an action that expects a result, sleep briefly to wait for it
-    if (ctx.state._pending_action) {
-      ctx.sleep([
-        { type: "topic", value: "memory.result" },
-        { type: "timer", value: "5s" },
-      ]);
-    }
+    // After an action that expects a result, just return — the framework parks
+    // us until memory.result (or the next tick) wakes us back up.
 
   } catch (err) {
     ctx.log("error", `Consolidation error: ${err instanceof Error ? err.message : String(err)}`);
-    ctx.sleep([{ type: "timer", value: "10m" }, { type: "any" }]);
   }
 };

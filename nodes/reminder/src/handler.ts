@@ -141,11 +141,8 @@ export const handler: NodeHandler = (ctx) => {
     });
   }
 
-  // If there are pending reminders, wake periodically to check them.
-  // Otherwise let the runner auto-sleep (wakes on new reminder.set message).
-  if (remaining.length > 0) {
-    ctx.sleep([{ type: "timer", value: "5s" }, { type: "any" }]);
-  }
+  // Pending reminders are checked on each time.tick wake or on new
+  // reminder.set messages — the framework manages dormancy.
 
   return Promise.resolve();
 };

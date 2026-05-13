@@ -39,16 +39,12 @@ export const handler: NodeHandler = async (ctx) => {
       const hasKv = typeof ctx.state._kv_data === "string";
       const hasVec = typeof ctx.state._vec_data === "string";
 
-      // Wait for both backends (max 3 re-sleeps of 3s)
+      // Wait for both backends (max 3 wakes)
       if (!hasKv || !hasVec) {
         const waited = (ctx.state._wait_count as number | undefined) ?? 0;
         if (waited < 3) {
           ctx.state._wait_count = waited + 1;
           ctx.log("info", `Waiting for ${!hasKv ? "KV" : "vector"} results (${waited + 1}/3)`);
-          ctx.sleep([
-            { type: "topic", value: !hasKv ? "memory.result" : "memory-vector.result" },
-            { type: "timer", value: "3s" },
-          ]);
           return;
         }
         ctx.log("info", "Proceeding with partial results");
@@ -144,12 +140,6 @@ export const handler: NodeHandler = async (ctx) => {
 
       ctx.state.pending_query = content;
       ctx.state.pending_from = req.from;
-
-      ctx.sleep([
-        { type: "topic", value: "memory.result" },
-        { type: "topic", value: "memory-vector.result" },
-        { type: "timer", value: "10s" },
-      ]);
       return;
     }
   }
