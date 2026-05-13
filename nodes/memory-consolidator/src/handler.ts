@@ -1,5 +1,4 @@
 import type { NodeHandler, TextPayload } from "@brain/sdk";
-import { LLMRegistry, generateText } from "@brain/core";
 
 /**
  * Memory Consolidator — autonomous LLM agent for memory maintenance.
@@ -62,9 +61,6 @@ function parseAction(text: string): Action | null {
 }
 
 export const handler: NodeHandler = async (ctx) => {
-  const overrides = ctx.node.config_overrides ?? {} as Record<string, unknown>;
-  const modelName = (overrides.model as string | undefined) ?? "ollama/gemma4:e4b";
-
   // Determine wake context
   const wokeFromSleep = ctx.state._woke_from_sleep as boolean | undefined;
   const hasMessages = ctx.messages.length > 0;
@@ -110,18 +106,10 @@ export const handler: NodeHandler = async (ctx) => {
 
   // === LLM call ===
   try {
-    const registry = LLMRegistry.getInstance();
-    await registry.initialize();
-    const model = registry.getModel(modelName);
-
-    const result = await generateText({
-      model,
+    const text = await ctx.llm.text({
       system: SYSTEM_PROMPT,
-      messages: conversation,
-      abortSignal: ctx.signal,
+      prompt: conversation,
     });
-
-    const text = typeof result.text === "string" ? result.text : "";
     ctx.log("info", `LLM: ${text.slice(0, 120)}`);
     conversation.push({ role: "assistant", content: text });
 

@@ -1,9 +1,4 @@
 import type { NodeHandler, TextPayload, Message } from "@brain/sdk";
-import { LLMRegistry, generateText } from "@brain/core";
-
-function getModel(overrides: Record<string, unknown>): string {
-  return (overrides.model as string | undefined) ?? "ollama/gemma4:e4b";
-}
 
 /**
  * Memory proxy — reactive gateway to the memory subsystem.
@@ -15,8 +10,6 @@ function getModel(overrides: Record<string, unknown>): string {
  */
 export const handler: NodeHandler = async (ctx) => {
   if (ctx.messages.length === 0) return;
-
-  const modelName = getModel(ctx.node.config_overrides ?? {} as Record<string, unknown>);
 
   // Sort messages by type
   const requests: Message[] = [];
@@ -67,21 +60,10 @@ export const handler: NodeHandler = async (ctx) => {
       ctx.log("info", `Synthesizing: KV=${kvData.length}chars Vec=${vecData.length}chars`);
 
       try {
-        const registry = LLMRegistry.getInstance();
-        await registry.initialize();
-        const model = registry.getModel(modelName);
-
-        const result = await generateText({
-          model,
+        const text = await ctx.llm.text({
           system: "You synthesize memory search results into a concise answer. Respond in the same language as the query. If no results found, say so clearly.",
-          messages: [{
-            role: "user",
-            content: `Query: "${pendingQuery}"\n\nKey-value results:\n${kvData || "(empty)"}\n\nVector search results:\n${vecData || "(empty)"}\n\nSynthesize a clear answer.`,
-          }],
-          abortSignal: ctx.signal,
+          prompt: `Query: "${pendingQuery}"\n\nKey-value results:\n${kvData || "(empty)"}\n\nVector search results:\n${vecData || "(empty)"}\n\nSynthesize a clear answer.`,
         });
-
-        const text = typeof result.text === "string" ? result.text : "";
         ctx.log("info", `Response: ${text.slice(0, 120)}`);
         ctx.respond(text || "No relevant memories found.", { query: pendingQuery, requested_by: pendingFrom });
       } catch (err) {
@@ -135,18 +117,10 @@ export const handler: NodeHandler = async (ctx) => {
       let vecQuery = content;
 
       try {
-        const registry = LLMRegistry.getInstance();
-        await registry.initialize();
-        const model = registry.getModel(modelName);
-
-        const reformulation = await generateText({
-          model,
+        const raw = await ctx.llm.text({
           system: "Extract search keywords from the user question. ALWAYS produce keywords in English. Respond with ONLY a JSON object: {\"kv\": \"short keywords\", \"vec\": \"natural language query\"}. No explanation.",
-          messages: [{ role: "user", content }],
-          abortSignal: ctx.signal,
+          prompt: content,
         });
-
-        const raw = typeof reformulation.text === "string" ? reformulation.text : "";
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]) as { kv?: string; vec?: string };
