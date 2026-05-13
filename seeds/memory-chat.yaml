@@ -1,0 +1,81 @@
+# memory-chat — full memory subsystem with chat to interact.
+#
+# Topology:
+#   chat ──mem.store/mem.ask──▶ memory-proxy ──memory.store/recall/search──▶ memory
+#                                            ──memory-vector.store/search──▶ memory-vector
+#                                            ──synth via LLM──▶ mem.response ──▶ chat
+#   cron(10m) ──memory.maintenance.tick──▶ memory-consolidator ──memory.maintenance.log
+#
+# Try in chat: "remember: I like olive trees" then "what do I like?".
+# memory-proxy fans out to the KV + vector stores and replies back.
+
+nodes:
+  - type: chat
+    name: human
+    description: "Chat UI. Pick mem.ask or mem.store from the topic dropdown to send queries; replies arrive on mem.response."
+    priority: 5
+    position: { x: 50, y: 350 }
+    subscriptions:
+      - topic: "mem.response"
+      - topic: "memory.maintenance.log"
+
+  - type: memory-proxy
+    name: memory-proxy
+    description: "Natural-language gateway. Dispatches to KV + vector and synthesizes the response."
+    priority: 5
+    position: { x: 350, y: 350 }
+    subscriptions:
+      - topic: "mem.ask"
+      - topic: "mem.store"
+      - topic: "memory.result"
+      - topic: "memory-vector.result"
+    config_overrides:
+      model: "ollama/gemma4:e4b"
+      response_topic: "mem.response"
+
+  - type: memory
+    name: kv-store
+    description: "Persistent KV — facts, names, preferences."
+    priority: 3
+    position: { x: 650, y: 200 }
+    subscriptions:
+      - topic: "memory.store"
+      - topic: "memory.recall"
+      - topic: "memory.search"
+      - topic: "memory.update"
+      - topic: "memory.delete"
+      - topic: "memory.list"
+
+  - type: memory-vector
+    name: vector-store
+    description: "LanceDB + Ollama embeddings for semantic search."
+    priority: 3
+    position: { x: 650, y: 500 }
+    subscriptions:
+      - topic: "memory-vector.store"
+      - topic: "memory-vector.search"
+      - topic: "memory-vector.index"
+      - topic: "memory-vector.reindex"
+
+  - type: memory-consolidator
+    name: janitor
+    description: "Autonomous maintenance. Cron-driven cleanup pass."
+    priority: 2
+    position: { x: 350, y: 650 }
+    subscriptions:
+      - topic: "memory.result"
+      - topic: "memory.maintenance.tick"
+    config_overrides:
+      model: "ollama/gemma4:e4b"
+      max_iterations: 8
+
+  - type: cron
+    name: cleanup-cron
+    description: "Pings memory.maintenance.tick every 10 minutes."
+    priority: 1
+    position: { x: 50, y: 650 }
+    config_overrides:
+      topic: "memory.maintenance.tick"
+      content: "scheduled cleanup"
+      interval: "10m"
+      criticality: 2
