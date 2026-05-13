@@ -15,16 +15,6 @@ import type { NodeHandler, TextPayload } from "@brain/sdk";
 const SYSTEM_PROMPT = `You are the memory consolidator of the brAIn network.
 Your job is to keep the memory store clean, organized, and useful.
 
-## Your tools
-Respond with ONE JSON action at a time:
-
-- Search: {"action":"search","query":"<keywords>"}
-- List all: {"action":"list"}
-- Delete: {"action":"delete","key":"<key>"}
-- Update: {"action":"update","key":"<key>","value":"<new_value>"}
-- Store new: {"action":"store","key":"<key>","value":"<value>","tags":["<tag>"]}
-- Done (sleep): {"action":"sleep"}
-
 ## Your responsibilities
 - Remove duplicate or redundant entries (merge them into one)
 - Remove stale or meaningless entries (test data, empty values)
@@ -34,31 +24,67 @@ Respond with ONE JSON action at a time:
 - Keep entries concise but complete
 
 ## Rules
-- Do ONE action at a time, wait for the result before deciding next
-- Be conservative — don't delete useful information
-- Prefer updating over deleting when information can be improved
-- Use your full budget: keep working as long as there are things to improve
-- Only sleep when you have reviewed everything and there is genuinely nothing left to do
-- If contradictory entries exist, keep the most recent one and delete the older
-- If duplicate entries exist, merge them into one with the best key name`;
+- Do ONE action at a time, then wait for the result before deciding next.
+- Be conservative — don't delete useful information.
+- Prefer updating over deleting when information can be improved.
+- Use your full budget: keep working as long as there are things to improve.
+- Use the framework-provided \`stop\` tool when you have reviewed everything and there is genuinely nothing left to do.
+- If contradictory entries exist, keep the most recent one and delete the older.
+- If duplicate entries exist, merge them into one with the best key name.
 
-interface Action {
-  action: string;
-  key?: string;
-  value?: string;
-  query?: string;
-  tags?: string[];
-}
+You MUST act through one of the provided tools — no free text.`;
 
-function parseAction(text: string): Action | null {
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    const obj = JSON.parse(match[0]) as Record<string, unknown>;
-    if (typeof obj.action === "string") return obj as unknown as Action;
-  } catch { /* ignore */ }
-  return null;
-}
+const ACTION_TOOLS = {
+  list: {
+    description: "List every memory entry. Use this to survey what's stored before consolidating.",
+    inputSchema: {
+      type: "object", additionalProperties: false, properties: {},
+    },
+  },
+  search: {
+    description: "Search the memory store for entries matching the given keywords.",
+    inputSchema: {
+      type: "object", required: ["query"], additionalProperties: false,
+      properties: {
+        query: { type: "string", description: "Search keywords." },
+      },
+    },
+  },
+  delete: {
+    description: "Delete a memory entry by its key. Only use after confirming the entry is stale, duplicate, or meaningless.",
+    inputSchema: {
+      type: "object", required: ["key"], additionalProperties: false,
+      properties: {
+        key: { type: "string", description: "The exact key of the entry to delete." },
+      },
+    },
+  },
+  update: {
+    description: "Replace the value of an existing memory entry. Prefer this over delete when the information can be improved or merged.",
+    inputSchema: {
+      type: "object", required: ["key", "value"], additionalProperties: false,
+      properties: {
+        key: { type: "string", description: "The exact key of the entry to update." },
+        value: { type: "string", description: "The new value (full replacement)." },
+      },
+    },
+  },
+  store: {
+    description: "Store a new memory entry. Use this when consolidating multiple entries into one new well-named entry.",
+    inputSchema: {
+      type: "object", required: ["key", "value"], additionalProperties: false,
+      properties: {
+        key: { type: "string", description: "Clear, descriptive key for the new entry." },
+        value: { type: "string", description: "The value of the entry." },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional tags improving searchability.",
+        },
+      },
+    },
+  },
+} as const;
 
 // Minimum interval between idle consolidation runs (ms).
 const RUN_INTERVAL_MS = 60 * 60 * 1000; // 1h
@@ -123,83 +149,76 @@ export const handler: NodeHandler = async (ctx) => {
   // Keep conversation short
   while (conversation.length > 20) conversation.shift();
 
-  // === LLM call ===
+  // === LLM call — multi-tool dispatch ===
+  // Every consolidator decision goes through a typed tool: ai-sdk
+  // validates args against the schema, no JSON extraction, no parsing
+  // fallback. The framework-injected `stop` tool replaces the old
+  // {"action":"sleep"} pattern.
   try {
-    const text = await ctx.llm.text({
+    const picked = await ctx.llm.tools({
+      tools: ACTION_TOOLS,
       system: SYSTEM_PROMPT,
       prompt: conversation,
     });
-    ctx.log("info", `LLM: ${text.slice(0, 120)}`);
-    conversation.push({ role: "assistant", content: text });
+    ctx.log("info", `Action tool: ${picked.toolName}`);
+    conversation.push({
+      role: "assistant",
+      content: JSON.stringify({ tool: picked.toolName, args: picked.args }),
+    });
 
-    const action = parseAction(text);
-    if (!action) {
-      ctx.log("info", "No action parsed, sleeping");
+    if (picked.toolName === "stop") {
+      ctx.log("info", "Done consolidating");
+      if (ctx.state._made_changes) {
+        ctx.log("info", "Triggering vector reindex");
+        ctx.publish("memory-vector.reindex", { type: "text", criticality: 1, payload: { content: "{}" } });
+        ctx.state._made_changes = false;
+      }
+      ctx.state._progress = undefined;
+      ctx.state._conversation = [];
       return;
     }
 
-    // === Execute action ===
-    switch (action.action) {
+    const args = picked.args as { key?: string; value?: string; query?: string; tags?: string[] };
+    switch (picked.toolName) {
       case "list":
-        ctx.log("info", "Action: list all memories");
         ctx.publish("memory.list", { type: "text", criticality: 1, payload: { content: "{}" } });
         ctx.state._pending_action = "list";
         ctx.state._progress = "listing memories";
         break;
 
       case "search":
-        ctx.log("info", `Action: search "${action.query}"`);
         ctx.publish("memory.search", {
           type: "text", criticality: 1,
-          payload: { content: JSON.stringify({ query: action.query }) },
+          payload: { content: JSON.stringify({ query: args.query }) },
         });
         ctx.state._pending_action = "search";
-        ctx.state._progress = `searching for "${action.query}"`;
+        ctx.state._progress = `searching for "${args.query}"`;
         break;
 
       case "delete":
-        ctx.log("info", `Action: delete "${action.key}"`);
-        ctx.publish("memory.delete", { type: "text", criticality: 1, payload: { content: JSON.stringify({ key: action.key }) } });
+        ctx.publish("memory.delete", { type: "text", criticality: 1, payload: { content: JSON.stringify({ key: args.key }) } });
         ctx.state._pending_action = "delete";
-        ctx.state._progress = `deleted "${action.key}"`;
+        ctx.state._progress = `deleted "${args.key}"`;
         ctx.state._made_changes = true;
-        ctx.respond(`Deleted memory: ${action.key}`, { action: "delete" });
+        ctx.respond(`Deleted memory: ${args.key}`, { action: "delete" });
         break;
 
       case "update":
-        ctx.log("info", `Action: update "${action.key}"`);
-        ctx.publish("memory.update", { type: "text", criticality: 1, payload: { content: JSON.stringify({ key: action.key, value: action.value }) } });
+        ctx.publish("memory.update", { type: "text", criticality: 1, payload: { content: JSON.stringify({ key: args.key, value: args.value }) } });
         ctx.state._pending_action = "update";
-        ctx.state._progress = `updated "${action.key}"`;
+        ctx.state._progress = `updated "${args.key}"`;
         ctx.state._made_changes = true;
-        ctx.respond(`Updated memory: ${action.key}`, { action: "update" });
+        ctx.respond(`Updated memory: ${args.key}`, { action: "update" });
         break;
 
       case "store":
-        ctx.log("info", `Action: store "${action.key}"`);
-        ctx.publish("memory.store", { type: "text", criticality: 1, payload: { content: JSON.stringify({ key: action.key, value: action.value, tags: action.tags ?? [] }) } });
+        ctx.publish("memory.store", { type: "text", criticality: 1, payload: { content: JSON.stringify({ key: args.key, value: args.value, tags: args.tags ?? [] }) } });
         ctx.state._pending_action = "store";
-        ctx.state._progress = `stored "${action.key}"`;
+        ctx.state._progress = `stored "${args.key}"`;
         ctx.state._made_changes = true;
-        ctx.respond(`Stored memory: ${action.key}`, { action: "store" });
+        ctx.respond(`Stored memory: ${args.key}`, { action: "store" });
         break;
-
-      case "sleep":
-        ctx.log("info", "Action: sleep (done consolidating)");
-        if (ctx.state._made_changes) {
-          ctx.log("info", "Triggering vector reindex");
-          ctx.publish("memory-vector.reindex", { type: "text", criticality: 1, payload: { content: "{}" } });
-          ctx.state._made_changes = false;
-        }
-        ctx.state._progress = undefined;
-        ctx.state._conversation = [];
-        return;
-
-      default:
-        ctx.log("warn", `Unknown action: ${action.action}`);
-        conversation.push({ role: "user", content: `Unknown action "${action.action}". Use: list, search, delete, update, store, or sleep.` });
     }
-
     // After an action that expects a result, just return — the framework parks
     // us until memory.result (or the next tick) wakes us back up.
 

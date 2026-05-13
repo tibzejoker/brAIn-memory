@@ -113,16 +113,32 @@ export const handler: NodeHandler = async (ctx) => {
       let vecQuery = content;
 
       try {
-        const raw = await ctx.llm.text({
-          system: "Extract search keywords from the user question. ALWAYS produce keywords in English. Respond with ONLY a JSON object: {\"kv\": \"short keywords\", \"vec\": \"natural language query\"}. No explanation.",
+        const result = await ctx.llm.tool({
+          tool: {
+            name: "reformulate_query",
+            description: "Extract two search formulations from the user question for a hybrid KV + vector memory search.",
+            inputSchema: {
+              type: "object",
+              required: ["kv", "vec"],
+              additionalProperties: false,
+              properties: {
+                kv: {
+                  type: "string",
+                  description: "Short keyword string for the key-value store (English).",
+                },
+                vec: {
+                  type: "string",
+                  description: "Natural-language reformulation for the vector store (English).",
+                },
+              },
+            },
+          },
+          system: "Extract search formulations from the user question. ALWAYS produce English. Use the `reformulate_query` tool.",
           prompt: content,
         });
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]) as { kv?: string; vec?: string };
-          if (parsed.kv) kvQuery = parsed.kv;
-          if (parsed.vec) vecQuery = parsed.vec;
-        }
+        const args = result.args as { kv?: string; vec?: string };
+        if (args.kv) kvQuery = args.kv;
+        if (args.vec) vecQuery = args.vec;
       } catch {
         ctx.log("warn", "Query reformulation failed, using raw query");
       }
