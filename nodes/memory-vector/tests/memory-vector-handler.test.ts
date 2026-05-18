@@ -146,11 +146,16 @@ describe("memory-vector handler", () => {
       fs.rmSync(tmpDir, { recursive: true });
     }
 
-    // Restore real DB if it was backed up
+    // Restore real DB if it was backed up. The data dir may not exist
+    // at all on a fresh CI checkout — that's fine, just means there's
+    // nothing to restore.
     const realDbPath = (globalThis as Record<string, unknown>).__vecDbPath as string;
-    const backups = fs.readdirSync(path.dirname(realDbPath))
-      .filter((f) => f.startsWith("vector_db.bak-"))
-      .map((f) => path.join(path.dirname(realDbPath), f));
+    const realDbDir = path.dirname(realDbPath);
+    const backups = fs.existsSync(realDbDir)
+      ? fs.readdirSync(realDbDir)
+        .filter((f) => f.startsWith("vector_db.bak-"))
+        .map((f) => path.join(realDbDir, f))
+      : [];
     if (backups.length > 0) {
       // Remove test DB if created
       if (fs.existsSync(realDbPath)) {
