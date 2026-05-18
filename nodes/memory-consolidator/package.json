@@ -3,13 +3,15 @@
   "version": "0.1.0",
   "main": "dist/handler.js",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run"
   },
   "dependencies": {
     "@brain/sdk": "workspace:*",
     "@brain/core": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0"
+    "@types/node": "^20.11.0",
+    "vitest": "^3.2.4"
   }
 }
