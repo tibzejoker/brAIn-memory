@@ -8,6 +8,14 @@
     { "topic": "memory.result", "description": "Output of the memory KV store, observed by the consolidator to spot duplicates / stale entries.", "internal": true },
     { "topic": "time.tick", "description": "Clock tick used to drive periodic consolidation runs (gated by ctx.state._last_run_at).", "internal": true }
   ],
-  "default_publishes": ["memory.maintenance.log"],
+  "default_publishes": [
+    "memory.maintenance.log",
+    "memory.list",
+    "memory.search",
+    "memory.store",
+    "memory.update",
+    "memory.delete",
+    "memory-vector.reindex"
+  ],
   "supports_transport": ["process"]
 }
