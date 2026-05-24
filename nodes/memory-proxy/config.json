@@ -10,6 +10,12 @@
     { "topic": "memory.result", "description": "Replies from the KV store, observed so the proxy can synthesize a final answer.", "internal": true },
     { "topic": "memory-vector.result", "description": "Replies from the vector store, observed so the proxy can synthesize a final answer.", "internal": true }
   ],
-  "default_publishes": ["mem.response"],
+  "default_publishes": [
+    "mem.response",
+    "memory.store",
+    "memory.search",
+    "memory-vector.store",
+    "memory-vector.search"
+  ],
   "supports_transport": ["process"]
 }
