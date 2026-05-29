@@ -1,21 +1,115 @@
 {
   "name": "memory-proxy",
   "description": "Intelligent memory interface. Receives natural language memory requests, queries the right memory stores (key-value and vector), and returns synthesized results. Can autonomously reorganize and consolidate memories.",
-  "tags": ["memory", "proxy", "intelligence"],
+  "tags": [
+    "memory",
+    "proxy",
+    "intelligence"
+  ],
   "default_authority": 0,
   "default_priority": 5,
-  "default_subscriptions": [
-    { "topic": "mem.ask", "description": "Natural-language memory query. The proxy reformulates and dispatches to KV + vector stores, then synthesizes the results.", "inputSchema": {"type":"object","properties":{"query":{"type":"string","description":"Free-form question about anything the network has remembered."}},"required":["query"]} },
-    { "topic": "mem.store", "description": "Natural-language memory store request. The proxy decides whether to put it in the KV store, the vector store, or both.", "inputSchema": {"type":"object","properties":{"content":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}}},"required":["content"]} },
-    { "topic": "memory.result", "description": "Replies from the KV store, observed so the proxy can synthesize a final answer.", "internal": true },
-    { "topic": "memory-vector.result", "description": "Replies from the vector store, observed so the proxy can synthesize a final answer.", "internal": true }
-  ],
-  "default_publishes": [
-    "mem.response",
-    "memory.store",
-    "memory.search",
-    "memory-vector.store",
-    "memory-vector.search"
-  ],
-  "supports_transport": ["process"]
+  "ports": {
+    "inputs": {
+      "mem.ask": {
+        "description": "Natural-language memory query. The proxy reformulates and dispatches to KV + vector stores, then synthesizes the results.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Free-form question about anything the network has remembered."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      "mem.store": {
+        "description": "Natural-language memory store request. The proxy decides whether to put it in the KV store, the vector store, or both.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "content"
+          ]
+        }
+      },
+      "memory.result": {
+        "description": "Replies from the KV store, observed so the proxy can synthesize a final answer.",
+        "inputSchema": {
+          "type": "object"
+        }
+      },
+      "memory-vector.result": {
+        "description": "Replies from the vector store, observed so the proxy can synthesize a final answer.",
+        "inputSchema": {
+          "type": "object"
+        }
+      }
+    },
+    "outputs": {
+      "mem.response": {
+        "description": "mem.response"
+      },
+      "memory.store": {
+        "description": "memory.store"
+      },
+      "memory.search": {
+        "description": "memory.search"
+      },
+      "memory-vector.store": {
+        "description": "memory-vector.store"
+      },
+      "memory-vector.search": {
+        "description": "memory-vector.search"
+      }
+    }
+  },
+  "default_port_bindings": {
+    "inputs": {
+      "mem.ask": [
+        "mem.ask"
+      ],
+      "mem.store": [
+        "mem.store"
+      ],
+      "memory.result": [
+        "memory.result"
+      ],
+      "memory-vector.result": [
+        "memory-vector.result"
+      ]
+    },
+    "outputs": {
+      "mem.response": [
+        "mem.response"
+      ],
+      "memory.store": [
+        "memory.store"
+      ],
+      "memory.search": [
+        "memory.search"
+      ],
+      "memory-vector.store": [
+        "memory-vector.store"
+      ],
+      "memory-vector.search": [
+        "memory-vector.search"
+      ]
+    }
+  },
+  "supports_transport": [
+    "process"
+  ]
 }

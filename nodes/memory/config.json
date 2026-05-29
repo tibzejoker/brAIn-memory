@@ -1,17 +1,148 @@
 {
   "name": "memory",
   "description": "Persistent key-value memory store with tags and search. Supports store, recall, search, update, delete operations via JSON messages.",
-  "tags": ["memory", "storage", "knowledge"],
+  "tags": [
+    "memory",
+    "storage",
+    "knowledge"
+  ],
   "default_authority": 0,
   "default_priority": 3,
-  "default_subscriptions": [
-    { "topic": "memory.store", "description": "Store a key-value entry. Payload: {key, value, tags?}.", "inputSchema": {"type":"object","properties":{"key":{"type":"string"},"value":{},"tags":{"type":"array","items":{"type":"string"}}},"required":["key","value"]} },
-    { "topic": "memory.recall", "description": "Recall an entry by exact key. Payload: {key}.", "inputSchema": {"type":"object","properties":{"key":{"type":"string"}},"required":["key"]} },
-    { "topic": "memory.search", "description": "Search entries by free-text matching against keys, values, and tags. Payload: {query}.", "inputSchema": {"type":"object","properties":{"query":{"type":"string"}},"required":["query"]} },
-    { "topic": "memory.update", "description": "Update an existing entry's value or tags. Payload: {key, value?, tags?}.", "inputSchema": {"type":"object","properties":{"key":{"type":"string"},"value":{},"tags":{"type":"array","items":{"type":"string"}}},"required":["key"]} },
-    { "topic": "memory.delete", "description": "Delete an entry by key. Payload: {key}.", "inputSchema": {"type":"object","properties":{"key":{"type":"string"}},"required":["key"]} },
-    { "topic": "memory.list", "description": "List all entries, optionally filtered by tag. Payload: {tag?}.", "inputSchema": {"type":"object","properties":{"tag":{"type":"string","description":"Optional tag filter"}},"additionalProperties":false} }
-  ],
-  "default_publishes": ["memory.result"],
-  "supports_transport": ["process"]
+  "ports": {
+    "inputs": {
+      "memory.store": {
+        "description": "Store a key-value entry. Payload: {key, value, tags?}.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "value": {},
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ]
+        }
+      },
+      "memory.recall": {
+        "description": "Recall an entry by exact key. Payload: {key}.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      },
+      "memory.search": {
+        "description": "Search entries by free-text matching against keys, values, and tags. Payload: {query}.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      "memory.update": {
+        "description": "Update an existing entry's value or tags. Payload: {key, value?, tags?}.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "value": {},
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      },
+      "memory.delete": {
+        "description": "Delete an entry by key. Payload: {key}.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      },
+      "memory.list": {
+        "description": "List all entries, optionally filtered by tag. Payload: {tag?}.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "type": "string",
+              "description": "Optional tag filter"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "outputs": {
+      "memory.result": {
+        "description": "memory.result"
+      }
+    }
+  },
+  "default_port_bindings": {
+    "inputs": {
+      "memory.store": [
+        "memory.store"
+      ],
+      "memory.recall": [
+        "memory.recall"
+      ],
+      "memory.search": [
+        "memory.search"
+      ],
+      "memory.update": [
+        "memory.update"
+      ],
+      "memory.delete": [
+        "memory.delete"
+      ],
+      "memory.list": [
+        "memory.list"
+      ]
+    },
+    "outputs": {
+      "memory.result": [
+        "memory.result"
+      ]
+    }
+  },
+  "supports_transport": [
+    "process"
+  ]
 }
