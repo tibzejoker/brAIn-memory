@@ -1,21 +1,87 @@
 {
   "name": "memory-consolidator",
   "description": "Autonomous memory maintenance agent. Periodically reviews, consolidates, and cleans up stored memories. Merges duplicates, removes stale entries, and improves memory organization.",
-  "tags": ["memory", "llm", "maintenance", "autonomous"],
+  "tags": [
+    "memory",
+    "llm",
+    "maintenance",
+    "autonomous"
+  ],
   "default_authority": 0,
   "default_priority": 2,
-  "default_subscriptions": [
-    { "topic": "memory.result", "description": "Output of the memory KV store, observed by the consolidator to spot duplicates / stale entries.", "internal": true },
-    { "topic": "time.tick", "description": "Clock tick used to drive periodic consolidation runs (gated by ctx.state._last_run_at).", "internal": true }
-  ],
-  "default_publishes": [
-    "memory.maintenance.log",
-    "memory.list",
-    "memory.search",
-    "memory.store",
-    "memory.update",
-    "memory.delete",
-    "memory-vector.reindex"
-  ],
-  "supports_transport": ["process"]
+  "ports": {
+    "inputs": {
+      "memory.result": {
+        "description": "Output of the memory KV store, observed by the consolidator to spot duplicates / stale entries.",
+        "inputSchema": {
+          "type": "object"
+        }
+      },
+      "time.tick": {
+        "description": "Clock tick used to drive periodic consolidation runs (gated by ctx.state._last_run_at).",
+        "inputSchema": {
+          "type": "object"
+        }
+      }
+    },
+    "outputs": {
+      "memory.maintenance.log": {
+        "description": "memory.maintenance.log"
+      },
+      "memory.list": {
+        "description": "memory.list"
+      },
+      "memory.search": {
+        "description": "memory.search"
+      },
+      "memory.store": {
+        "description": "memory.store"
+      },
+      "memory.update": {
+        "description": "memory.update"
+      },
+      "memory.delete": {
+        "description": "memory.delete"
+      },
+      "memory-vector.reindex": {
+        "description": "memory-vector.reindex"
+      }
+    }
+  },
+  "default_port_bindings": {
+    "inputs": {
+      "memory.result": [
+        "memory.result"
+      ],
+      "time.tick": [
+        "time.tick"
+      ]
+    },
+    "outputs": {
+      "memory.maintenance.log": [
+        "memory.maintenance.log"
+      ],
+      "memory.list": [
+        "memory.list"
+      ],
+      "memory.search": [
+        "memory.search"
+      ],
+      "memory.store": [
+        "memory.store"
+      ],
+      "memory.update": [
+        "memory.update"
+      ],
+      "memory.delete": [
+        "memory.delete"
+      ],
+      "memory-vector.reindex": [
+        "memory-vector.reindex"
+      ]
+    }
+  },
+  "supports_transport": [
+    "process"
+  ]
 }
