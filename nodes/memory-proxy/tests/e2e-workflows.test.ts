@@ -7,8 +7,8 @@
  *
  * Requires: Ollama running with the test model.
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { BrainService, LLMRegistry } from "@brain/core";
+import { describe, it, expect, afterEach } from "vitest";
+import { BrainService, LLMRegistry, getNodeDataRoot } from "@brain/core";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -18,8 +18,6 @@ import { allStoreprojectNodeDirs } from "./_helpers/storeprojects-dirs";
 const TEST_MODEL = "ollama/gemma4:e4b";
 const TIMEOUT_PER_ATTEMPT = 90_000;
 const MAX_ATTEMPTS = 2;
-const DATA_DIR = path.resolve(__dirname, "..", "..", "..", "..", "..", "brAIn", "data");
-const MEM_PATH = path.join(DATA_DIR, "memory.json");
 
 async function isOllamaAvailable(): Promise<boolean> {
   try {
@@ -73,17 +71,23 @@ function debugDump(brain: BrainService): void {
 
 // === Full reset: new BrainService, empty bus, clean memory ===
 
-function resetMemory(seed?: Record<string, unknown>): void {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(MEM_PATH, JSON.stringify(seed ?? {}, null, 2));
-}
+// The memory node persists inside its per-instance ctx.dataDir
+// (<data>/nodes/<id>/memory.json) — track that file per network, not the
+// legacy shared data/memory.json.
+let memPath = "";
+const spawnedDataDirs: string[] = [];
 
 async function freshNetwork(extraNodes: string[] = []): Promise<BrainService> {
   const brain = new BrainService(":memory:");
   brain.bootstrap(allStoreprojectNodeDirs());
   await LLMRegistry.getInstance().initialize();
 
-  await brain.spawnNode({ type: "memory", name: "memory" });
+  const memNode = await brain.spawnNode({ type: "memory", name: "memory" });
+  const memDataDir = path.join(getNodeDataRoot(), memNode.id);
+  spawnedDataDirs.push(memDataDir);
+  memPath = path.join(memDataDir, "memory.json");
+  fs.mkdirSync(memDataDir, { recursive: true });
+  fs.writeFileSync(memPath, "{}");
   await brain.spawnNode({
     type: "memory-proxy", name: "memory-proxy",
     config_overrides: { model: TEST_MODEL, response_topic: "mem.response" },
@@ -152,19 +156,13 @@ describe("e2e workflows", async () => {
     return;
   }
 
-  // Backup original memory once
-  const hadMemory = fs.existsSync(MEM_PATH);
-  const memBackupPath = `${MEM_PATH}.e2e-workflows-bak`;
-  beforeAll(() => { if (hadMemory) fs.copyFileSync(MEM_PATH, memBackupPath); });
-
   let lastBrain: BrainService | null = null;
-  afterEach(() => { try { lastBrain?.killAll(); } catch { /* */ } lastBrain = null; });
-  afterAll(() => {
-    if (hadMemory && fs.existsSync(memBackupPath)) {
-      fs.copyFileSync(memBackupPath, MEM_PATH);
-      fs.unlinkSync(memBackupPath);
-    } else if (fs.existsSync(MEM_PATH)) {
-      fs.unlinkSync(MEM_PATH);
+  afterEach(() => {
+    try { lastBrain?.killAll(); } catch { /* */ }
+    lastBrain = null;
+    // Throwaway per-instance UUID data dirs — clean them.
+    for (const dir of spawnedDataDirs.splice(0)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
     }
   });
 
@@ -176,7 +174,7 @@ describe("e2e workflows", async () => {
 
     const { success, brain } = await withRetry({
       label: "Shell",
-      setup: async () => { resetMemory(); return freshNetwork(["terminal"]); },
+      setup: async () => freshNetwork(["terminal"]),
       run: async (b) => {
         sendChat(b, [
           `Run this shell command: echo "${token}"`,
@@ -199,7 +197,7 @@ describe("e2e workflows", async () => {
 
     const { success, brain } = await withRetry({
       label: "Store",
-      setup: async () => { resetMemory(); return freshNetwork(); },
+      setup: async () => freshNetwork(),
       run: async (b) => {
         sendChat(b, [
           `Store something in memory for me.`,
@@ -211,7 +209,7 @@ describe("e2e workflows", async () => {
         const storeOk = await waitForMessage(b, "mem.response", "Stored", TIMEOUT_PER_ATTEMPT);
         if (!storeOk) return false;
 
-        const mem = fs.existsSync(MEM_PATH) ? fs.readFileSync(MEM_PATH, "utf-8") : "";
+        const mem = fs.existsSync(memPath) ? fs.readFileSync(memPath, "utf-8") : "";
         return mem.includes(animal);
       },
     });
@@ -228,7 +226,7 @@ describe("e2e workflows", async () => {
 
     const { success, brain } = await withRetry({
       label: "Whoami",
-      setup: async () => { resetMemory(); return freshNetwork(["terminal"]); },
+      setup: async () => freshNetwork(["terminal"]),
       run: async (b) => {
         sendChat(b, [
           `Run the "whoami" command using publish_message on topic "cmd.exec".`,

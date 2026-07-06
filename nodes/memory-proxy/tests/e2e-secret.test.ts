@@ -8,8 +8,8 @@
  *
  * Requires: Ollama running with the test model.
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { BrainService, LLMRegistry } from "@brain/core";
+import { describe, it, expect, afterEach } from "vitest";
+import { BrainService, LLMRegistry, getNodeDataRoot } from "@brain/core";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -19,8 +19,6 @@ const TEST_MODEL = "ollama/gemma4:e4b";
 const TIMEOUT_PER_ATTEMPT = 60_000;
 const MAX_ATTEMPTS = 3;
 const SECRET = `CODE-${crypto.randomBytes(8).toString("hex").toUpperCase()}`;
-const DATA_DIR = path.resolve(__dirname, "..", "..", "..", "..", "..", "brAIn", "data");
-const MEM_PATH = path.join(DATA_DIR, "memory.json");
 
 async function isOllamaAvailable(): Promise<boolean> {
   try {
@@ -44,26 +42,29 @@ describe("e2e: secret retrieval through full network", async () => {
     return;
   }
 
-  // Backup memory once
-  const hadMemory = fs.existsSync(MEM_PATH);
-  const backupPath = `${MEM_PATH}.e2e-secret-bak`;
-  beforeAll(() => { if (hadMemory) fs.copyFileSync(MEM_PATH, backupPath); });
-  afterAll(() => {
-    if (hadMemory && fs.existsSync(backupPath)) {
-      fs.copyFileSync(backupPath, MEM_PATH);
-      fs.unlinkSync(backupPath);
-    } else if (fs.existsSync(MEM_PATH)) {
-      fs.unlinkSync(MEM_PATH);
+  let brain: BrainService | null = null;
+  const spawnedDataDirs: string[] = [];
+  afterEach(() => {
+    try { brain?.killAll(); } catch { /* */ }
+    brain = null;
+    for (const dir of spawnedDataDirs.splice(0)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
     }
   });
 
-  let brain: BrainService | null = null;
-  afterEach(() => { try { brain?.killAll(); } catch { /* */ } brain = null; });
-
-  /** Full reset: seed memory + boot fresh network. */
+  /** Full reset: boot fresh network + seed the memory node's own store.
+   *  The memory node persists inside its per-instance ctx.dataDir
+   *  (<data>/nodes/<id>/memory.json), not the legacy shared data/memory.json. */
   async function freshSetup(): Promise<BrainService> {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(MEM_PATH, JSON.stringify({
+    const b = new BrainService(":memory:");
+    b.bootstrap(allStoreprojectNodeDirs());
+    await LLMRegistry.getInstance().initialize();
+
+    const memNode = await b.spawnNode({ type: "memory", name: "memory" });
+    const memDataDir = path.join(getNodeDataRoot(), memNode.id);
+    spawnedDataDirs.push(memDataDir);
+    fs.mkdirSync(memDataDir, { recursive: true });
+    fs.writeFileSync(path.join(memDataDir, "memory.json"), JSON.stringify({
       e2e_secret_code: {
         key: "e2e_secret_code",
         value: SECRET,
@@ -73,12 +74,6 @@ describe("e2e: secret retrieval through full network", async () => {
         created_by: "e2e-test",
       },
     }, null, 2));
-
-    const b = new BrainService(":memory:");
-    b.bootstrap(allStoreprojectNodeDirs());
-    await LLMRegistry.getInstance().initialize();
-
-    await b.spawnNode({ type: "memory", name: "memory" });
     await b.spawnNode({
       type: "memory-proxy", name: "memory-proxy",
       config_overrides: { model: TEST_MODEL, response_topic: "mem.response" },
