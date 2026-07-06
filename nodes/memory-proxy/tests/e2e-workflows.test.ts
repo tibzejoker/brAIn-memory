@@ -97,7 +97,7 @@ async function freshNetwork(extraNodes: string[] = []): Promise<BrainService> {
     subscriptions: [
       { topic: "chat.input" }, { topic: "alerts.*" },
       { topic: "mem.response" }, { topic: "memory.result" },
-      { topic: "cmd.output" }, { topic: "http.response" },
+      { topic: "terminal.output" }, { topic: "http.response" },
     ],
     config_overrides: {
       model: TEST_MODEL, response_topic: "chat.response",
@@ -107,11 +107,13 @@ async function freshNetwork(extraNodes: string[] = []): Promise<BrainService> {
 
   for (const type of extraNodes) {
     if (type === "terminal") {
+      // Rely on the terminal's DECLARED input port (terminal.exec) so the
+      // brain gets a typed terminal_exec meta-tool; replies land on the
+      // output port (terminal.output).
       await brain.spawnNode({
         type: "terminal", name: "shell",
-        subscriptions: [{ topic: "cmd.exec" }],
         config_overrides: {
-          response_topic: "cmd.output", timeout_ms: 10000,
+          timeout_ms: 10000,
           allowed_commands: ["echo", "date", "whoami", "ls", "cat", "head"],
         },
       });
@@ -177,9 +179,8 @@ describe("e2e workflows", async () => {
       setup: async () => freshNetwork(["terminal"]),
       run: async (b) => {
         sendChat(b, [
-          `Run this shell command: echo "${token}"`,
-          `Use publish_message with topic "cmd.exec" and content: echo "${token}"`,
-          `Then tell me the output.`,
+          `Run this shell command on the shell node: echo "${token}"`,
+          `Then tell me its exact output.`,
         ].join(" "));
         return (await waitForMessage(b, "chat.response", token, TIMEOUT_PER_ATTEMPT)) !== null;
       },
@@ -199,18 +200,22 @@ describe("e2e workflows", async () => {
       label: "Store",
       setup: async () => freshNetwork(),
       run: async (b) => {
+        // Don't prescribe the channel: since the meta-tools wiring the
+        // brain reaches memory via its typed memory_store tool rather
+        // than a hand-rolled publish_message. The real assertion is the
+        // memory node's store file — poll it directly.
         sendChat(b, [
-          `Store something in memory for me.`,
-          `Use publish_message on topic "mem.store" with this exact JSON as content:`,
-          `{"key":"secret_animal","value":"${animal}","tags":["test"]}`,
-          `Then confirm.`,
+          `Store this in memory: key "secret_animal", value "${animal}", tags ["test"].`,
+          `Then confirm to me that it is stored.`,
         ].join(" "));
 
-        const storeOk = await waitForMessage(b, "mem.response", "Stored", TIMEOUT_PER_ATTEMPT);
-        if (!storeOk) return false;
-
-        const mem = fs.existsSync(memPath) ? fs.readFileSync(memPath, "utf-8") : "";
-        return mem.includes(animal);
+        const deadline = Date.now() + TIMEOUT_PER_ATTEMPT;
+        while (Date.now() < deadline) {
+          await delay(3000);
+          const mem = fs.existsSync(memPath) ? fs.readFileSync(memPath, "utf-8") : "";
+          if (mem.includes(animal)) return true;
+        }
+        return false;
       },
     });
     lastBrain = brain;
@@ -229,8 +234,8 @@ describe("e2e workflows", async () => {
       setup: async () => freshNetwork(["terminal"]),
       run: async (b) => {
         sendChat(b, [
-          `Run the "whoami" command using publish_message on topic "cmd.exec".`,
-          `Tell me the result.`,
+          `Run the shell command "whoami" on the shell node,`,
+          `then tell me its exact output.`,
         ].join(" "));
         return (await waitForMessage(b, "chat.response", username, TIMEOUT_PER_ATTEMPT)) !== null;
       },

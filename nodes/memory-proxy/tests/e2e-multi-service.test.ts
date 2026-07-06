@@ -72,9 +72,8 @@ describe("e2e: multi-service chain", async () => {
     });
     await b.spawnNode({
       type: "terminal", name: "shell",
-      subscriptions: [{ topic: "cmd.exec" }],
       config_overrides: {
-        response_topic: "cmd.output", timeout_ms: 10000,
+        timeout_ms: 10000,
         allowed_commands: ["echo", "date", "whoami"],
       },
     });
@@ -83,7 +82,7 @@ describe("e2e: multi-service chain", async () => {
       subscriptions: [
         { topic: "chat.input" }, { topic: "alerts.*" },
         { topic: "mem.response" }, { topic: "memory.result" },
-        { topic: "cmd.output" },
+        { topic: "terminal.output" },
       ],
       config_overrides: {
         model: TEST_MODEL, response_topic: "chat.response",
@@ -106,10 +105,12 @@ describe("e2e: multi-service chain", async () => {
       brain.bus.publish({
         from: "e2e-test", topic: "chat.input", type: "text", criticality: 5,
         payload: {
+          // Outcome-oriented prompt: with the meta-tools wiring the brain
+          // picks its own typed channel to the shell and memory nodes.
           content: [
             `Do two things in order:`,
-            `1. Run this shell command using publish_message on topic "cmd.exec": echo "${token}"`,
-            `2. After you get the result, store it in memory using publish_message on topic "mem.store" with content: {"key":"cmd_result","value":"${token}","tags":["test"]}`,
+            `1. Run this shell command on the shell node: echo "${token}"`,
+            `2. After you get the result, store it in memory: key "cmd_result", value "${token}", tags ["test"].`,
             `Tell me when both are done.`,
           ].join("\n"),
         },
