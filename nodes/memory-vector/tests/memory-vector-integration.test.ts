@@ -9,8 +9,13 @@
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import type { NodeContext, Message } from "@brain/sdk";
+
+// The handler stores its LanceDB inside ctx.dataDir — give every run a
+// fresh temp dir so the e2e suite never touches real node data.
+let tmpDataDir: string;
 
 // === Check Ollama availability before running ===
 async function isOllamaAvailable(): Promise<boolean> {
@@ -38,6 +43,7 @@ function mockCtx(messages: Message[]): NodeContext & {
     messages,
     published,
     logs,
+    dataDir: tmpDataDir,
     readMessages: () => [],
     respond(content, metadata) {
       published.push({ topic: "memory-vector.result", type: "text", criticality: 1, payload: { content }, metadata });
@@ -99,8 +105,6 @@ describe("memory-vector e2e with real embeddings", async () => {
   }
 
   let handler: (ctx: NodeContext) => Promise<void>;
-  let realDbPath: string;
-  let backupPath: string | null = null;
 
   const CORPUS = [
     { text: "Thibaut is a French software developer who builds the brAIn project using TypeScript", tags: ["user", "identity"] },
@@ -116,11 +120,7 @@ describe("memory-vector e2e with real embeddings", async () => {
   ];
 
   beforeAll(async () => {
-    realDbPath = path.resolve(__dirname, "..", "..", "..", "..", "..", "brAIn", "data", "vector_db");
-    if (fs.existsSync(realDbPath)) {
-      backupPath = `${realDbPath}.e2e-bak-${Date.now()}`;
-      fs.renameSync(realDbPath, backupPath);
-    }
+    tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "memvec-e2e-"));
 
     const mod = await import("../src/handler");
     handler = mod.handler;
@@ -137,11 +137,8 @@ describe("memory-vector e2e with real embeddings", async () => {
   });
 
   afterAll(() => {
-    if (fs.existsSync(realDbPath)) {
-      fs.rmSync(realDbPath, { recursive: true });
-    }
-    if (backupPath && fs.existsSync(backupPath)) {
-      fs.renameSync(backupPath, realDbPath);
+    if (tmpDataDir && fs.existsSync(tmpDataDir)) {
+      fs.rmSync(tmpDataDir, { recursive: true });
     }
   });
 
