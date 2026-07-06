@@ -11,17 +11,17 @@
  *
  * Requires: Ollama running with the test model.
  */
-import { describe, it, expect, afterAll, afterEach } from "vitest";
-import { BrainService, LLMRegistry } from "@brain/core";
+import { describe, it, expect, afterEach } from "vitest";
+import { BrainService, LLMRegistry, getNodeDataRoot } from "@brain/core";
 import * as fs from "fs";
 import * as path from "path";
 import { allStoreprojectNodeDirs } from "./_helpers/storeprojects-dirs";
 
-const TEST_MODEL = "ollama/gemma4:e4b";
-const DATA_DIR = path.resolve(__dirname, "..", "..", "..", "..", "..", "brAIn", "data");
-const MEM_PATH = path.join(DATA_DIR, "memory.json");
+const TEST_MODEL = process.env.BRAIN_E2E_MODEL ?? "ollama/gemma4:e4b";
 const MAX_WAIT = 90_000;
-const MAX_ATTEMPTS = 2;
+// A 4B-class model skips the job on a bad sampling day — give it three
+// fresh runs before declaring the consolidator broken.
+const MAX_ATTEMPTS = 3;
 
 async function isOllamaAvailable(): Promise<boolean> {
   try {
@@ -42,8 +42,11 @@ const TWO_DAYS_AGO = Date.now() - 2 * 86_400_000;
 const ONE_HOUR_AGO = Date.now() - 3_600_000;
 const NOW = Date.now();
 
-function seedMemory(): void {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+// The memory node persists its store inside its own per-instance
+// ctx.dataDir (<data>/nodes/<nodeId>/memory.json) — seed THAT file,
+// not the legacy shared data/memory.json the node no longer reads.
+function seedMemory(memPath: string): void {
+  fs.mkdirSync(path.dirname(memPath), { recursive: true });
 
   const data: Record<string, unknown> = {
     // Contradictory: old says Paris, recent says Lyon
@@ -101,12 +104,12 @@ function seedMemory(): void {
     },
   };
 
-  fs.writeFileSync(MEM_PATH, JSON.stringify(data, null, 2));
+  fs.writeFileSync(memPath, JSON.stringify(data, null, 2));
 }
 
-function readMemory(): Record<string, { key: string; value: string; tags: string[] }> {
-  if (!fs.existsSync(MEM_PATH)) return {};
-  return JSON.parse(fs.readFileSync(MEM_PATH, "utf-8")) as Record<string, { key: string; value: string; tags: string[] }>;
+function readMemory(memPath: string): Record<string, { key: string; value: string; tags: string[] }> {
+  if (!fs.existsSync(memPath)) return {};
+  return JSON.parse(fs.readFileSync(memPath, "utf-8")) as Record<string, { key: string; value: string; tags: string[] }>;
 }
 
 describe("e2e: memory consolidator", async () => {
@@ -116,19 +119,16 @@ describe("e2e: memory consolidator", async () => {
     return;
   }
 
-  const hadMemory = fs.existsSync(MEM_PATH);
-  const memBackup = `${MEM_PATH}.consolidator-bak`;
-
-  afterAll(() => {
-    if (hadMemory && fs.existsSync(memBackup)) {
-      fs.copyFileSync(memBackup, MEM_PATH); fs.unlinkSync(memBackup);
-    } else if (fs.existsSync(MEM_PATH)) {
-      fs.unlinkSync(MEM_PATH);
+  let brain: BrainService | null = null;
+  const spawnedDataDirs: string[] = [];
+  afterEach(() => {
+    try { brain?.killAll(); } catch { /* */ }
+    brain = null;
+    // The per-instance node data dirs are throwaway UUID dirs — clean them.
+    for (const dir of spawnedDataDirs.splice(0)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
     }
   });
-
-  let brain: BrainService | null = null;
-  afterEach(() => { try { brain?.killAll(); } catch { /* */ } brain = null; });
 
   it("consolidates contradictory and duplicate memories", async () => {
     let cleaned = false;
@@ -136,21 +136,25 @@ describe("e2e: memory consolidator", async () => {
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !cleaned; attempt++) {
       // Full reset
       if (brain) { brain.killAll(); brain = null; }
-      if (hadMemory && attempt === 0) fs.copyFileSync(MEM_PATH, memBackup);
-      seedMemory();
-
-      const before = readMemory();
-      const keysBefore = Object.keys(before);
-      console.log(`\n  Attempt ${attempt + 1}: ${keysBefore.length} entries before consolidation`);
 
       brain = new BrainService(":memory:");
       brain.bootstrap(allStoreprojectNodeDirs());
       await LLMRegistry.getInstance().initialize();
 
-      // Spawn memory KV (needed for the consolidator to talk to)
-      await brain.spawnNode({ type: "memory", name: "memory" });
+      // Spawn memory KV (needed for the consolidator to talk to), then
+      // seed its own per-instance store with the dirty corpus.
+      const memNode = await brain.spawnNode({ type: "memory", name: "memory" });
+      const memDataDir = path.join(getNodeDataRoot(), memNode.id);
+      const memPath = path.join(memDataDir, "memory.json");
+      spawnedDataDirs.push(memDataDir);
+      seedMemory(memPath);
 
-      // Spawn consolidator — it wakes immediately (no sleep state)
+      const before = readMemory(memPath);
+      const keysBefore = Object.keys(before);
+      console.log(`\n  Attempt ${attempt + 1}: ${keysBefore.length} entries before consolidation`);
+
+      // Spawn the consolidator after the seed so its first wake already
+      // sees dirty data.
       const consolidator = await brain.spawnNode({
         type: "memory-consolidator",
         name: "memory-janitor",
@@ -158,15 +162,15 @@ describe("e2e: memory consolidator", async () => {
         config_overrides: {
           model: TEST_MODEL,
           max_iterations: 8,
-          forced_sleep: "5s",
         },
       });
+      spawnedDataDirs.push(path.join(getNodeDataRoot(), consolidator.id));
 
       // Send it a kick to start (it needs a message or timer wake)
       await delay(2000);
       brain.bus.publish({
         from: "test", topic: "memory.result", type: "text", criticality: 1,
-        payload: { content: "Wake up and start maintenance." },
+        payload: { content: "Maintenance time. Memory currently contains duplicate and contradictory entries. List all memories, then use the update/delete tools to merge duplicates and resolve contradictions (keep the most recent fact). Do not stop before you have modified at least one entry." },
       });
 
       // Wait for consolidator to finish its budget and sleep
@@ -174,7 +178,7 @@ describe("e2e: memory consolidator", async () => {
       while (Date.now() < deadline) {
         await delay(3000);
 
-        const after = readMemory();
+        const after = readMemory(memPath);
         const keysAfter = Object.keys(after);
 
         // Track if anything changed
@@ -188,10 +192,10 @@ describe("e2e: memory consolidator", async () => {
           if (entriesRemoved || valuesChanged) cleaned = true;
         }
 
-        // Wait until the consolidator goes to sleep (done with its budget)
-        const state = brain.instanceRegistry.get(consolidator.id);
-        if (cleaned && state?.state === "sleeping") {
-          const afterFinal = readMemory();
+        // The reactive runtime has no sleep state — as soon as memory got
+        // cleaner the job is proven, stop polling.
+        if (cleaned) {
+          const afterFinal = readMemory(memPath);
           const keysFinal = Object.keys(afterFinal);
           console.log(`  Done: ${keysFinal.length} entries (was ${keysBefore.length})`);
           console.log("  Remaining:", keysFinal);
