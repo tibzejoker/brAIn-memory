@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.1](https://github.com/tibzejoker/brAIn-memory/compare/v1.0.0...v1.0.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* **memory-consolidator:** seed the memory node's real per-instance store in the e2e ([3f37976](https://github.com/tibzejoker/brAIn-memory/commit/3f37976c3242af253ee26ee9c23f90b62e05c495))
+* **memory-proxy:** point the e2e suites at the memory node's real store, serialize the files ([4fe8a9d](https://github.com/tibzejoker/brAIn-memory/commit/4fe8a9d277a1e7ed92792f7a701dd06c570e2149))
+* **memory-vector:** give the e2e suite its own temp dataDir ([8dbb91a](https://github.com/tibzejoker/brAIn-memory/commit/8dbb91a678f707378c52bbc00724715169afba98))
+
 ## 1.0.0 (2026-06-01)
 
 
