@@ -10,8 +10,8 @@
  *
  * Requires: Ollama running with the test model.
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
-import { BrainService, LLMRegistry } from "@brain/core";
+import { describe, it, expect, afterEach } from "vitest";
+import { BrainService, LLMRegistry, getNodeDataRoot } from "@brain/core";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -20,8 +20,6 @@ import { allStoreprojectNodeDirs } from "./_helpers/storeprojects-dirs";
 const TEST_MODEL = "ollama/gemma4:e4b";
 const TIMEOUT = 90_000;
 const MAX_ATTEMPTS = 3;
-const DATA_DIR = path.resolve(__dirname, "..", "..", "..", "..", "..", "brAIn", "data");
-const MEM_PATH = path.join(DATA_DIR, "memory.json");
 
 async function isOllamaAvailable(): Promise<boolean> {
   try {
@@ -45,29 +43,29 @@ describe("e2e: multi-service chain", async () => {
     return;
   }
 
-  const hadMemory = fs.existsSync(MEM_PATH);
-  const backupPath = `${MEM_PATH}.e2e-multi-bak`;
-  beforeAll(() => { if (hadMemory) fs.copyFileSync(MEM_PATH, backupPath); });
-  afterAll(() => {
-    if (hadMemory && fs.existsSync(backupPath)) {
-      fs.copyFileSync(backupPath, MEM_PATH); fs.unlinkSync(backupPath);
-    } else if (fs.existsSync(MEM_PATH)) {
-      fs.unlinkSync(MEM_PATH);
+  let brain: BrainService | null = null;
+  // The memory node persists inside its per-instance ctx.dataDir
+  // (<data>/nodes/<id>/memory.json) — that's the file to watch, not the
+  // legacy shared data/memory.json.
+  let memPath = "";
+  const spawnedDataDirs: string[] = [];
+  afterEach(() => {
+    try { brain?.killAll(); } catch { /* */ }
+    brain = null;
+    for (const dir of spawnedDataDirs.splice(0)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* */ }
     }
   });
 
-  let brain: BrainService | null = null;
-  afterEach(() => { try { brain?.killAll(); } catch { /* */ } brain = null; });
-
   async function freshSetup(): Promise<BrainService> {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(MEM_PATH, "{}");
-
     const b = new BrainService(":memory:");
     b.bootstrap(allStoreprojectNodeDirs());
     await LLMRegistry.getInstance().initialize();
 
-    await b.spawnNode({ type: "memory", name: "memory" });
+    const memNode = await b.spawnNode({ type: "memory", name: "memory" });
+    const memDataDir = path.join(getNodeDataRoot(), memNode.id);
+    spawnedDataDirs.push(memDataDir);
+    memPath = path.join(memDataDir, "memory.json");
     await b.spawnNode({
       type: "memory-proxy", name: "memory-proxy",
       config_overrides: { model: TEST_MODEL, response_topic: "mem.response" },
@@ -117,11 +115,11 @@ describe("e2e: multi-service chain", async () => {
         },
       });
 
-      // Wait for the token to appear in memory.json
+      // Wait for the token to appear in the memory node's store
       const deadline = Date.now() + TIMEOUT;
       while (Date.now() < deadline && !found) {
         await delay(3000);
-        const mem = fs.existsSync(MEM_PATH) ? fs.readFileSync(MEM_PATH, "utf-8") : "";
+        const mem = fs.existsSync(memPath) ? fs.readFileSync(memPath, "utf-8") : "";
         if (mem.includes(token)) found = true;
       }
 
@@ -134,7 +132,7 @@ describe("e2e: multi-service chain", async () => {
         for (const l of logs) console.log(`    [${l.level}] ${l.message.slice(0, 120)}`);
         console.log("  Bus:");
         for (const m of msgs) console.log(`    ${m.topic}: ${(m.payload as { content?: string }).content?.slice(0, 80)}`);
-        console.log("  Memory:", fs.existsSync(MEM_PATH) ? fs.readFileSync(MEM_PATH, "utf-8").slice(0, 200) : "empty");
+        console.log("  Memory:", fs.existsSync(memPath) ? fs.readFileSync(memPath, "utf-8").slice(0, 200) : "empty");
       }
     }
 
